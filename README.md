@@ -56,9 +56,12 @@ Frontend-ът никога не съдържа `SUPABASE_SERVICE_ROLE_KEY` ил�
 - Supabase акаунт (безплатен план е достатъчен за старт)
 - Gemini API key (от Google AI Studio)
 - Достъп до DNS записите на `todorovtees.com`
-- Node.js ≥ 20, npm
-- (по желание, за локална разработка/deploy на функции) `supabase` CLI:
-  `npm install -g supabase`
+
+Всичко по-долу може да се направи **изцяло през браузъра** — качване на
+GitHub (drag & drop upload), миграции и Edge Functions (Supabase Dashboard),
+build (GitHub Actions). Node.js/npm и `supabase` CLI трябват само ако
+предпочитате терминал вместо браузър, или искате локална разработка
+(вижте [§6](#6-локална-разработка)).
 
 ## 1. Supabase проект
 
@@ -66,18 +69,22 @@ Frontend-ът никога не съдържа `SUPABASE_SERVICE_ROLE_KEY` ил�
 2. **Authentication → Providers → Email**: изключете "Allow new users to
    sign up" (`enable_signup = false`, вече зададено и в `supabase/config.toml`
    за локална разработка). Само admin-покани създават акаунти.
-3. Свържете CLI-то с проекта и push-нете миграциите (създават всички
-   таблици, RLS политики, storage bucket-а и helper функциите):
+3. Приложете миграциите, за да се създадат всички таблици, RLS политики,
+   storage bucket-а и helper функциите. Два начина:
+
+   **Без CLI (през браузъра):** Dashboard → **SQL Editor** → **New query**.
+   Отворете всеки файл в `supabase/migrations/` **по ред** (0001, 0002, …
+   0008), копирайте съдържанието му, поставете го в SQL Editor и натиснете
+   **Run**. Повторете за всеки файл — важно е редът, защото по-късен файл
+   разчита на таблици/функции от по-ранен.
+
+   **С CLI:**
 
    ```bash
    supabase login
    supabase link --project-ref YOUR-PROJECT-REF
    supabase db push
    ```
-
-   (Или, ако предпочитате без CLI: копирайте съдържанието на всеки файл в
-   `supabase/migrations/`, по ред, в Supabase Dashboard → SQL Editor и
-   изпълнете.)
 
 4. **Project Settings → API**: копирайте `Project URL` и `anon public` key
    → ще отидат във `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
@@ -106,6 +113,21 @@ Frontend-ът никога не съдържа `SUPABASE_SERVICE_ROLE_KEY` ил�
 
 ## 3. Edge Functions
 
+Всяка от четирите функции (`chat`, `search`, `process-file`, `admin-users`)
+е написана нарочно **самостоятелна** — целият ѝ код е в един файл
+`index.ts`, без връзки към други файлове. Това е, за да може да се качи и
+директно през браузъра, без CLI.
+
+**Без CLI (през браузъра):** Dashboard → **Edge Functions** → **Deploy a new
+function** → изберете **Via editor** (не "Via CLI") → именувайте функцията
+точно `chat` → изтрийте примерния код в редактора → отворете
+`supabase/functions/chat/index.ts` от проекта, копирайте **цялото**
+съдържание, поставете го в редактора → **Deploy**. Повторете същото за
+`search`, `process-file` и `admin-users` (име на функцията = име на папката
+= името в първия ред на всеки файл).
+
+**С CLI:**
+
 ```bash
 supabase functions deploy chat
 supabase functions deploy search
@@ -113,19 +135,17 @@ supabase functions deploy process-file
 supabase functions deploy admin-users
 ```
 
-Задайте server-side secrets (никога с `VITE_` префикс, никога commit-вани):
+И по двата начина накрая задайте server-side secrets — Dashboard → **Edge
+Functions → Manage secrets** (или през CLI, ако предпочитате):
 
-```bash
-supabase secrets set \
-  GEMINI_API_KEY=your-gemini-key \
-  GEMINI_MODEL=gemini-2.5-flash \
-  SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co \
-  SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+GEMINI_API_KEY=your-gemini-key
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-(`SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` понякога вече присъстват
-автоматично в средата на Edge Functions — ако `supabase secrets set` откаже
-да презапише системна стойност, е ок, кодът ги очаква именно с тези имена.)
+(`SUPABASE_URL` и `SUPABASE_SERVICE_ROLE_KEY` обикновено вече присъстват
+автоматично в средата на Edge Functions — не е нужно да ги задавате ръчно,
+освен ако Dashboard-ът изрично не поиска.)
 
 ## 4. GitHub repository и Actions
 

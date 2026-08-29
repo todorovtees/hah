@@ -7,15 +7,93 @@
 // трябва да се изпълняват server-side." This function is the only thing
 // with a reason to write to authorized_users or profiles.role.
 
-import { corsHeaders, handleOptions } from '../_shared/cors.ts';
-import { requireUser, requireAdmin, AuthError } from '../_shared/auth.ts';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
+// This file is intentionally self-contained (no imports from ../_shared) —
+// see the comment at the top of ../chat/index.ts for why.
+
+// ---------------------------------------------------------------------------
+// Shared: CORS
+// ---------------------------------------------------------------------------
+const ALLOWED_ORIGINS = new Set([
+  'https://hah.todorovtees.com',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]);
+
+function corsHeaders(origin: string | null): Record<string, string> {
+  const allowOrigin = origin && ALLOWED_ORIGINS.has(origin) ? origin : 'https://hah.todorovtees.com';
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    Vary: 'Origin',
+  };
+}
+
+function handleOptions(req: Request): Response | null {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders(req.headers.get('origin')) });
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Shared: auth
+// ---------------------------------------------------------------------------
+interface AuthedContext {
+  admin: SupabaseClient;
+  userId: string;
+  email: string;
+  role: 'admin' | 'user';
+}
+
+class AuthError extends Error {
+  constructor(
+    message: string,
+    public status: number = 401,
+  ) {
+    super(message);
+  }
+}
+
+async function requireUser(req: Request): Promise<AuthedContext> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) throw new AuthError('Missing Authorization header', 401);
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) throw new AuthError('Server misconfigured', 500);
+
+  const admin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  const jwt = authHeader.replace('Bearer ', '');
+  const { data: userData, error: userError } = await admin.auth.getUser(jwt);
+  if (userError || !userData?.user) throw new AuthError('Invalid or expired session', 401);
+
+  const { data: profile, error: profileError } = await admin
+    .from('profiles')
+    .select('role, email')
+    .eq('id', userData.user.id)
+    .single();
+  if (profileError || !profile) throw new AuthError('Account is not authorized', 403);
+
+  return { admin, userId: userData.user.id, email: profile.email, role: profile.role as 'admin' | 'user' };
+}
+
+function requireAdmin(ctx: AuthedContext): void {
+  if (ctx.role !== 'admin') throw new AuthError('Admin access required', 403);
+}
+
+// ---------------------------------------------------------------------------
+// /admin-users — endpoint-specific logic
+// ---------------------------------------------------------------------------
 Deno.serve(async (req: Request) => {
   const opt = handleOptions(req);
   if (opt) return opt;
   const headers = { ...corsHeaders(req.headers.get('origin')), 'Content-Type': 'application/json' };
 
-  let ctx;
+  let ctx: AuthedContext;
   try {
     ctx = await requireUser(req);
     requireAdmin(ctx);

@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 0004_usage_system_logs.sql
 -- Append-only logs. Written exclusively by edge functions using the service
--- role key (see supabase/functions/_shared) — never directly by clients.
+-- role key — never directly by clients.
 -- ============================================================================
 
 create table if not exists public.usage_logs (

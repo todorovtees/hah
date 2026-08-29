@@ -2,7 +2,7 @@
 -- 0008_rate_limit_function.sql
 -- Called by edge functions (service role) before doing any real work, so the
 -- limit is enforced centrally in the DB rather than duplicated/guessable in
--- each function. See supabase/functions/_shared/rateLimit.ts.
+-- each function's inlined rate-limit helper (see supabase/functions/*/index.ts).
 -- ============================================================================
 
 create or replace function public.count_recent_usage(

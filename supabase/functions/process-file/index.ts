@@ -13,15 +13,157 @@
 // text server-side so the chat function has something to send the model.
 // Nothing is usable in chat until this sets status = 'ready'.
 
-import { corsHeaders, handleOptions } from '../_shared/cors.ts';
-import { requireUser, AuthError } from '../_shared/auth.ts';
-import { enforceRateLimit, RateLimitError } from '../_shared/rateLimit.ts';
-import { logUsage, logSystemError } from '../_shared/logging.ts';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { Buffer } from 'node:buffer';
 import mammoth from 'npm:mammoth@1.8.0';
 import * as XLSX from 'npm:xlsx@0.18.5';
 import JSZip from 'npm:jszip@3.10.1';
 
+// This file is intentionally self-contained (no imports from ../_shared) —
+// see the comment at the top of ../chat/index.ts for why.
+
+// ---------------------------------------------------------------------------
+// Shared: CORS
+// ---------------------------------------------------------------------------
+const ALLOWED_ORIGINS = new Set([
+  'https://hah.todorovtees.com',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]);
+
+function corsHeaders(origin: string | null): Record<string, string> {
+  const allowOrigin = origin && ALLOWED_ORIGINS.has(origin) ? origin : 'https://hah.todorovtees.com';
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    Vary: 'Origin',
+  };
+}
+
+function handleOptions(req: Request): Response | null {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders(req.headers.get('origin')) });
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Shared: auth
+// ---------------------------------------------------------------------------
+interface AuthedContext {
+  admin: SupabaseClient;
+  userId: string;
+  email: string;
+  role: 'admin' | 'user';
+}
+
+class AuthError extends Error {
+  constructor(
+    message: string,
+    public status: number = 401,
+  ) {
+    super(message);
+  }
+}
+
+async function requireUser(req: Request): Promise<AuthedContext> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) throw new AuthError('Missing Authorization header', 401);
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) throw new AuthError('Server misconfigured', 500);
+
+  const admin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  const jwt = authHeader.replace('Bearer ', '');
+  const { data: userData, error: userError } = await admin.auth.getUser(jwt);
+  if (userError || !userData?.user) throw new AuthError('Invalid or expired session', 401);
+
+  const { data: profile, error: profileError } = await admin
+    .from('profiles')
+    .select('role, email')
+    .eq('id', userData.user.id)
+    .single();
+  if (profileError || !profile) throw new AuthError('Account is not authorized', 403);
+
+  return { admin, userId: userData.user.id, email: profile.email, role: profile.role as 'admin' | 'user' };
+}
+
+// ---------------------------------------------------------------------------
+// Shared: rate limiting
+// ---------------------------------------------------------------------------
+const RATE_LIMITS: Record<string, { windowSeconds: number; max: number }> = {
+  'process-file': { windowSeconds: 3600, max: 30 },
+};
+
+class RateLimitError extends Error {
+  constructor(public retryAfterSeconds: number) {
+    super('Rate limit exceeded');
+  }
+}
+
+async function enforceRateLimit(admin: SupabaseClient, userId: string, requestType: keyof typeof RATE_LIMITS) {
+  const limit = RATE_LIMITS[requestType];
+  if (!limit) return;
+
+  const { data, error } = await admin.rpc('count_recent_usage', {
+    p_user_id: userId,
+    p_request_type: requestType,
+    p_window_seconds: limit.windowSeconds,
+  });
+
+  if (error) {
+    await admin.from('system_logs').insert({
+      level: 'error',
+      source: 'rateLimit',
+      message: 'count_recent_usage failed',
+      metadata: { error: error.message, userId, requestType },
+    });
+    return;
+  }
+
+  if ((data as number) >= limit.max) throw new RateLimitError(limit.windowSeconds);
+}
+
+// ---------------------------------------------------------------------------
+// Shared: logging
+// ---------------------------------------------------------------------------
+async function logUsage(
+  admin: SupabaseClient,
+  entry: {
+    userId: string | null;
+    requestType: string;
+    model?: string;
+    inputSize?: number;
+    outputSize?: number;
+    durationMs?: number;
+    status: 'success' | 'error' | 'rate_limited';
+    errorCode?: string;
+  },
+) {
+  const { error } = await admin.from('usage_logs').insert({
+    user_id: entry.userId,
+    request_type: entry.requestType,
+    model: entry.model ?? null,
+    input_size: entry.inputSize ?? null,
+    output_size: entry.outputSize ?? null,
+    duration_ms: entry.durationMs ?? null,
+    status: entry.status,
+    error_code: entry.errorCode ?? null,
+  });
+  if (error) console.error('logUsage failed', error.message);
+}
+
+async function logSystemError(admin: SupabaseClient, source: string, message: string, metadata?: Record<string, unknown>) {
+  const { error } = await admin.from('system_logs').insert({ level: 'error', source, message, metadata: metadata ?? null });
+  if (error) console.error('logSystemError failed', error.message);
+}
+
+// ---------------------------------------------------------------------------
+// /process-file — endpoint-specific logic
+// ---------------------------------------------------------------------------
 const MAX_BYTES = 25 * 1024 * 1024; // must match the bucket's file_size_limit
 
 type Extractor = (bytes: Uint8Array) => Promise<string>;
@@ -158,7 +300,7 @@ Deno.serve(async (req: Request) => {
   const jsonHeaders = { ...corsHeaders(req.headers.get('origin')), 'Content-Type': 'application/json' };
   const started = Date.now();
 
-  let ctx;
+  let ctx: AuthedContext;
   try {
     ctx = await requireUser(req);
   } catch (err) {
