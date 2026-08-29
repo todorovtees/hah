@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#6366f1"/>
+  <path d="M9 9v14M9 16h14M23 9v14" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="40" y="22" font-family="Inter, sans-serif" font-size="18" font-weight="700" fill="currentColor">HAH</text>
+</svg>

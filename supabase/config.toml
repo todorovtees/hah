@@ -1,0 +1,48 @@
+project_id = "hah"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "https://hah.todorovtees.com"
+additional_redirect_urls = ["http://localhost:5173"]
+jwt_expiry = 3600
+enable_signup = false          # allowlist-only: accounts are created by admin invite, not self-signup
+enable_confirmations = true
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+
+[storage]
+enabled = true
+file_size_limit = "25MiB"
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+
+[functions.chat]
+verify_jwt = true
+
+[functions.search]
+verify_jwt = true
+
+[functions."process-file"]
+verify_jwt = true
+
+[functions."admin-users"]
+verify_jwt = true

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="bg">
+  <head>
+    <meta charset="UTF-8" />
+    <title>HAH</title>
+    <!--
+      GitHub Pages serves this file for any path it doesn't recognize (i.e.
+      every client-side route except /). We stash the intended path and send
+      the browser to the SPA root, where the inline script in index.html
+      restores it via history.replaceState so React Router can take over.
+    -->
+    <script>
+      sessionStorage.redirect = location.href;
+      location.replace(
+        location.origin + location.pathname.split('/').slice(0, 1).join('/') + '/'
+      );
+    </script>
+  </head>
+  <body></body>
+</html>
