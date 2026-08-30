@@ -38,7 +38,7 @@ export default function Chat() {
         onClose={() => setSidebarOpen(false)}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-surface-border px-3 py-2 md:justify-end">
           <button
             className="btn-ghost !px-2 md:hidden"
